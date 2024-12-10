@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN" monitorInterval="30">
+    <Properties>
+        <!-- Define custom properties -->
+        <Property name="LOG_PATTERN">%d{yyyy-MM-dd HH:mm:ss} %-5p %c{1}:%L - %m%n</Property>
+        <Property name="LOG_FILE_PATH">logs/application.log</Property>
+    </Properties>
+
+    <!-- Define appenders -->
+    <Appenders>
+        <!-- Console Appender: Logs to console -->
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="${LOG_PATTERN}" />
+        </Console>
+
+        <!-- Rolling File Appender: Log rotation by size and time -->
+        <RollingFile name="FileAppender" fileName="${LOG_FILE_PATH}"
+                     filePattern="logs/application-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="${LOG_PATTERN}" />
+            <Policies>
+                <!-- Trigger log rotation based on file size or daily time interval -->
+                <SizeBasedTriggeringPolicy size="10MB" />
+                <TimeBasedTriggeringPolicy />
+            </Policies>
+        </RollingFile>
+    </Appenders>
+
+    <!-- Define loggers -->
+    <Loggers>
+        <!-- Application-specific loggers -->
+        <Logger name="com.bhagwat.retail" level="DEBUG" additivity="false">
+            <AppenderRef ref="Console" />
+            <AppenderRef ref="FileAppender" />
+        </Logger>
+
+        <!-- Root logger: Applies to all packages -->
+        <Root level="INFO">
+            <AppenderRef ref="Console" />
+            <AppenderRef ref="FileAppender" />
+        </Root>
+    </Loggers>
+</Configuration>

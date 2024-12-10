@@ -1,0 +1,16 @@
+{
+  "userId": 1,
+  "userName": "admin",
+  "email": "john.doe@example.com",
+  "phoneNumber": "1234567890",
+  "addressId": 101,
+  "userCommunityAssociation": "Community-1",
+  "id": 123456,
+  "password": "admin123",
+  "communityId": 201,
+  "isAdminFlag": false,
+  "role": "USER",
+  "isOrgUser": false,
+  "orgId": 301,
+  "isAppUser": true
+}
