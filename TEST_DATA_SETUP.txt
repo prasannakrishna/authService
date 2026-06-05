@@ -1,0 +1,293 @@
+================================================================================
+  SCM TEST DATA SETUP — APIs & Payloads
+  Org: Bhagwat Sellers Pvt Ltd (06cefe7c-cbc6-46f0-98dc-17df7709382f)
+================================================================================
+
+Services:
+  - userService : http://localhost:8087
+  - authService : http://localhost:8097
+  - Keycloak    : http://localhost:8181  (realm: scm)
+
+NOTE: userService must be running before executing these calls.
+      authService reads from userService during login.
+
+--------------------------------------------------------------------------------
+STEP 0 — PRE-CHECK: Org must already exist
+--------------------------------------------------------------------------------
+The org "Bhagwat Sellers Pvt Ltd" was pre-existing in the DB.
+
+  org_id   : 06cefe7c-cbc6-46f0-98dc-17df7709382f
+  org_name : Bhagwat Sellers Pvt Ltd
+  tenant_id: tenant-001
+  is_active: true
+
+If it doesn't exist, create via:
+
+  POST http://localhost:8087/api/orgs/create
+  Content-Type: application/json
+
+  {
+    "orgId": "06cefe7c-cbc6-46f0-98dc-17df7709382f",
+    "orgName": "Bhagwat Sellers Pvt Ltd",
+    "tenantId": "tenant-001"
+  }
+
+--------------------------------------------------------------------------------
+STEP 1 — Create Division
+--------------------------------------------------------------------------------
+IMPORTANT: The DTO field is "divisionType", NOT "partyType".
+           Valid values: SELLER, STORE, WAREHOUSE, CARRIER, DELIVERY
+
+  POST http://localhost:8087/api/divisions/create
+  Content-Type: application/json
+
+  {
+    "orgId": "06cefe7c-cbc6-46f0-98dc-17df7709382f",
+    "divisionId": "badafa73-4d5e-41dc-8432-cb3d856221f4",
+    "divisionName": "Bhagwat Seller Division",
+    "divisionType": "SELLER"
+  }
+
+  Result:
+    division_id : badafa73-4d5e-41dc-8432-cb3d856221f4
+    party_type  : SELLER
+
+--------------------------------------------------------------------------------
+STEP 2 — Create User Groups (one per role)
+--------------------------------------------------------------------------------
+
+  POST http://localhost:8087/api/user-groups/create
+  Content-Type: application/json
+
+  -- ASSOCIATE group --
+  {
+    "orgId": "06cefe7c-cbc6-46f0-98dc-17df7709382f",
+    "divisionId": "badafa73-4d5e-41dc-8432-cb3d856221f4",
+    "groupName": "Bhagwat Seller Associate Group",
+    "roleType": "ASSOCIATE"
+  }
+
+  Result:
+    group_id: 70251032-5675-49a9-9cf6-13f0b2446c50
+
+  -- ADMIN group --
+  {
+    "orgId": "06cefe7c-cbc6-46f0-98dc-17df7709382f",
+    "divisionId": "badafa73-4d5e-41dc-8432-cb3d856221f4",
+    "groupName": "Bhagwat Seller Admin Group",
+    "roleType": "ADMIN"
+  }
+
+  Result:
+    group_id: 947a3141-3d90-43fb-8db8-f050ffcbccb3
+
+--------------------------------------------------------------------------------
+STEP 3 — Register Applications (one-time global setup)
+--------------------------------------------------------------------------------
+These may already exist. The app names are enum values: SELLER_APP, STORE_APP,
+WAREHOUSE_APP, CARRIER_APP, DELIVERY_APP.
+
+  POST http://localhost:8087/api/apps/register
+  Content-Type: application/json
+
+  { "appName": "SELLER_APP",    "linkUrl": "http://localhost:3001/seller/" }
+  { "appName": "STORE_APP",     "linkUrl": "http://localhost:3002/store/" }
+  { "appName": "WAREHOUSE_APP", "linkUrl": "http://localhost:3003/warehouse/" }
+  { "appName": "CARRIER_APP",   "linkUrl": "http://localhost:3004/logistics/" }
+  { "appName": "DELIVERY_APP",  "linkUrl": "http://localhost:3005/delivery/" }
+
+  Results (app_ids):
+    SELLER_APP    : 99309ba4-...
+    STORE_APP     : ce766b97-...
+    WAREHOUSE_APP : 792a24b4-...
+    CARRIER_APP   : 770197b5-...
+    DELIVERY_APP  : 7cb754e5-...
+
+--------------------------------------------------------------------------------
+STEP 4 — Create Application Subscriptions for the Division
+--------------------------------------------------------------------------------
+Associate users are scoped to their division, so subscriptions are tied to the
+division. Admin users see ALL org subscriptions.
+
+  POST http://localhost:8087/api/subscriptions/create
+  Content-Type: application/json
+
+  -- SELLER subscription --
+  {
+    "orgId": "06cefe7c-cbc6-46f0-98dc-17df7709382f",
+    "divisionId": "badafa73-4d5e-41dc-8432-cb3d856221f4",
+    "appId": "<SELLER_APP app_id>",
+    "plan": "GOLD",
+    "subscriptionKey": "seller-key-001"
+  }
+
+  Result: app_sub_id: 8943bdd6-...
+
+  -- STORE subscription --
+  {
+    "orgId": "06cefe7c-cbc6-46f0-98dc-17df7709382f",
+    "divisionId": "badafa73-4d5e-41dc-8432-cb3d856221f4",
+    "appId": "<STORE_APP app_id>",
+    "plan": "GOLD",
+    "subscriptionKey": "store-key-001"
+  }
+
+  Result: app_sub_id: a5221bf4-...
+
+  -- WAREHOUSE subscription --
+  {
+    "orgId": "06cefe7c-cbc6-46f0-98dc-17df7709382f",
+    "divisionId": "badafa73-4d5e-41dc-8432-cb3d856221f4",
+    "appId": "<WAREHOUSE_APP app_id>",
+    "plan": "GOLD",
+    "subscriptionKey": "warehouse-key-001"
+  }
+
+  Result: app_sub_id: 41a3eccd-...
+
+  -- CARRIER subscription --
+  {
+    "orgId": "06cefe7c-cbc6-46f0-98dc-17df7709382f",
+    "divisionId": "badafa73-4d5e-41dc-8432-cb3d856221f4",
+    "appId": "<CARRIER_APP app_id>",
+    "plan": "GOLD",
+    "subscriptionKey": "carrier-key-001"
+  }
+
+  Result: app_sub_id: 1a2ac16e-...
+
+  -- DELIVERY subscription --
+  {
+    "orgId": "06cefe7c-cbc6-46f0-98dc-17df7709382f",
+    "divisionId": "badafa73-4d5e-41dc-8432-cb3d856221f4",
+    "appId": "<DELIVERY_APP app_id>",
+    "plan": "GOLD",
+    "subscriptionKey": "delivery-key-001"
+  }
+
+  Result: app_sub_id: 8d3c6ef2-...
+
+  NOTE: All 5 subscriptions are needed so that admin users can see all apps.
+        Associate users see only apps matching their division's domain type.
+
+  Plans available: TRIAL (15 days), GOLD (1 month), PLATINUM (1 year)
+
+--------------------------------------------------------------------------------
+STEP 5 — Create Roles (if not pre-existing)
+--------------------------------------------------------------------------------
+Roles are global. These may already exist.
+
+  POST http://localhost:8087/api/roles/create
+  Content-Type: application/json
+
+  { "roleName": "ASSOCIATE_ROLE", "roleType": "ASSOCIATE" }
+  { "roleName": "ADMIN_ROLE",     "roleType": "ADMIN" }
+
+--------------------------------------------------------------------------------
+STEP 6 — Create Users
+--------------------------------------------------------------------------------
+
+  POST http://localhost:8087/api/users/create
+  Content-Type: application/json
+
+  -- Associate user (scoped to ASSOCIATE user group) --
+  {
+    "username": "scm.associate",
+    "email": "associate@bhagwat.com",
+    "password": "Test@1234",
+    "orgId": "06cefe7c-cbc6-46f0-98dc-17df7709382f",
+    "divisionId": "badafa73-4d5e-41dc-8432-cb3d856221f4",
+    "roleName": "ASSOCIATE_ROLE",
+    "groupId": "70251032-5675-49a9-9cf6-13f0b2446c50"
+  }
+
+  Result: userId: ad71d8c4-f22c-4f90-a08e-e6f53bfdf2d0
+
+  -- Admin user (scoped to ADMIN user group) --
+  {
+    "username": "scm.admin",
+    "email": "admin@bhagwat.com",
+    "password": "Test@1234",
+    "orgId": "06cefe7c-cbc6-46f0-98dc-17df7709382f",
+    "divisionId": "badafa73-4d5e-41dc-8432-cb3d856221f4",
+    "roleName": "ADMIN_ROLE",
+    "groupId": "947a3141-3d90-43fb-8db8-f050ffcbccb3"
+  }
+
+  Result: userId: 56cbbbc8-...
+
+  NOTE: User creation automatically syncs to Keycloak (via KeycloakSyncService)
+        and publishes a Kafka event to sync to MongoDB.
+
+--------------------------------------------------------------------------------
+STEP 7 — Verify Login
+--------------------------------------------------------------------------------
+
+  POST http://localhost:8097/auth/login
+  Content-Type: application/json
+
+  { "username": "scm.associate", "password": "Test@1234" }
+  { "username": "scm.admin",     "password": "Test@1234" }
+
+  Expected response fields:
+    accessToken      — Keycloak JWT
+    tokenType        — "Bearer"
+    expiresIn        — 300 (seconds)
+    tenantId         — "tenant-001"
+    domainType       — "SELLER"
+    roleType         — "ASSOCIATE" or "ADMIN"
+    subscriptionType — "GOLD"
+    userId, username, email, orgId, orgName, divisionId, divisionName
+
+--------------------------------------------------------------------------------
+TEST CREDENTIALS
+--------------------------------------------------------------------------------
+
+  Role        Username           Password    userId (prefix)
+  ----------  -----------------  ----------  ---------------
+  ASSOCIATE   seller.associate   Test@1234   ad71d8c4-...
+  ADMIN       seller.admin       Test@1234   56cbbbc8-...
+
+  Login behavior:
+    ASSOCIATE — sees only apps matching their division's domain type (SELLER → Seller App only)
+    ADMIN     — sees ALL 5 apps regardless of domain type (org has all 5 subscriptions)
+
+--------------------------------------------------------------------------------
+AUTH FLOW (how it works)
+--------------------------------------------------------------------------------
+
+  1. scm-login-app  →  POST /auth/login  →  authService:8097
+  2. authService    →  POST /api/users/validate  →  userService:8087
+                       (validates username+password against PostgreSQL)
+  3. authService    →  POST /realms/scm/protocol/openid-connect/token  →  Keycloak:8181
+                       (grant_type=password, gets JWT)
+  4. authService    →  GET /api/users/by-username/{username}  →  userService:8087
+                       (enriches response with orgId, divisionId, etc. from MongoDB)
+  5. authService    →  returns AuthResponse to scm-login-app
+  6. scm-login-app  →  reads JWT claims (domainType, roleType, subscriptionType, tenantId)
+                       to determine app routing and access
+
+  Keycloak client : scm-backend (confidential, Direct Access Grants enabled)
+  Client secret   : JWNcEsWwB55seZR4nYd4feW0AD7o1A7g
+  Realm           : scm
+
+--------------------------------------------------------------------------------
+SERVICE STATUS
+--------------------------------------------------------------------------------
+
+  userService : Started from IntelliJ (or mvn spring-boot:run), port 8087
+  authService : Started via 'mvn spring-boot:run' in this session (port 8097)
+                → You CAN stop it and restart from IntelliJ — no state is held
+                  in the process itself. All data is in PostgreSQL/MongoDB/Keycloak.
+                → IntelliJ run config: run AuthServiceApplication main class.
+
+  IMPORTANT for authService IntelliJ restart:
+    Make sure the source fix in KeycloakAuthService.java is compiled.
+    The fix is: all 4 claim lines in the AuthResponse builder are UNCOMMENTED:
+      .tenantId(getClaimAsString(claims, "tenantId"))
+      .domainType(getClaimAsString(claims, "domainType"))
+      .roleType(getClaimAsString(claims, "roleType"))
+      .subscriptionType(getClaimAsString(claims, "subscriptionType"))
+    IntelliJ should pick this up automatically since the source file is saved.
+
+================================================================================

@@ -28,13 +28,13 @@ public class AppSubscription {
     private Boolean syncUserJobTrigger = false;
 
     @Enumerated(EnumType.STRING) // Specifies that the field should be stored as a string in the DB
-    @Column(name = "sync_frequency", columnDefinition = "ENUM('monthly', 'quarterly', 'annually')")
+    @Column(name = "sync_frequency", columnDefinition = "varchar(20) check (sync_frequency in ('monthly','quarterly','annually'))")
     private SyncFrequency syncFrequency;
 
     @Column(name = "created_at", nullable = false, updatable = false, columnDefinition = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
     private Timestamp createdAt;
 
-    @Column(name = "updated_at", nullable = false, columnDefinition = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP")
+    @Column(name = "updated_at", nullable = false, columnDefinition = "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
     private Timestamp updatedAt;
 
     // Enum for sync frequency

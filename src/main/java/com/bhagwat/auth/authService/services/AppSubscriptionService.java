@@ -29,7 +29,7 @@ public class AppSubscriptionService {
     public boolean isUserAuthorized(Long appId, String appKey, Long userId) {
         Optional<AppSubscription> subscription = appSubscriptionRepository
                 .findByAppIdAndSubscriptionKeyAndUserId(appId, appKey, userId);
-
+// endofsubscriptiondate
         return subscription.isPresent(); // Returns true if the user has an active subscription
     }
 }

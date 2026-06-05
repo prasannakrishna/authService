@@ -3,7 +3,7 @@ package com.bhagwat.auth.authService.entity;
 import jakarta.persistence.*;
 
 @Entity
-@Table(name = "user", uniqueConstraints = {
+@Table(name = "users", uniqueConstraints = {
         @UniqueConstraint(name = "uk_username", columnNames = "user_name"),
         @UniqueConstraint(name = "uk_email", columnNames = "email")
 })

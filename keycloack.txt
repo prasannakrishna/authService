@@ -1,0 +1,71 @@
+scripts/keycloak-setup.sh it does all prequisite
+in IdeaProjects
+
+# 1. Get admin token (needed for all admin API calls)
+  curl -s -X POST "http://localhost:8181/realms/master/protocol/openid-connect/token" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "client_id=admin-cli&username=admin&password=admin123&grant_type=password"
+
+  # 2. Reset password to TempPass@123
+  curl -X PUT "http://localhost:8181/admin/realms/scm/users/e620798e-e9cd-4eda-a715-adb15e39e3b3/reset-password" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"type":"password","value":"TempPass@123","temporary":false}'
+
+  # 3. Set firstName + lastName (fixes "Account is not fully set up")
+  curl -X PUT "http://localhost:8181/admin/realms/scm/users/e620798e-e9cd-4eda-a715-adb15e39e3b3" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"firstName":"Prasanna","lastName":"Bhagwat","email":"prasannakrishna2011@gmail.com","emailVerified":true,"enabled":true,"requiredActions":[]}'
+
+  # 4. Add orgId to realm User Profile schema (without this, orgId attribute is silently dropped)
+  #    First GET existing profile:
+  curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
+    "http://localhost:8181/admin/realms/scm/users/profile"
+  #    Then PUT with orgId added to attributes array:
+  curl -X PUT "http://localhost:8181/admin/realms/scm/users/profile" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '<existing profile JSON with orgId appended to attributes>'
+  # The orgId entry:
+  # {"name":"orgId","permissions":{"view":["admin","user"],"edit":["admin"]},"multivalued":false}
+
+  # 5. Set all user attributes including orgId
+  curl -X PUT "http://localhost:8181/admin/realms/scm/users/e620798e-e9cd-4eda-a715-adb15e39e3b3" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "firstName":"Prasanna","lastName":"Bhagwat",
+      "email":"prasannakrishna2011@gmail.com","emailVerified":true,"enabled":true,
+      "attributes":{
+        "tenantId":["tenant-c64b017e"],
+        "orgId":["2842c2fd-980a-4224-9398-b4dabf49afb1"],
+        "domainType":["SELLER"],
+        "roleType":["ADMIN"],
+        "subscriptionType":["GOLD"]
+      }
+    }'
+
+  # 6. Add orgId protocol mapper to scm-backend client (so orgId appears in JWT)
+  curl -X POST "http://localhost:8181/admin/realms/scm/clients/9520b8f6-a832-4f78-9ec9-a744c1c6e1d7/protocol-mappers/models" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "name":"orgId",
+      "protocol":"openid-connect",
+      "protocolMapper":"oidc-usermodel-attribute-mapper",
+      "config":{
+        "user.attribute":"orgId",
+        "claim.name":"orgId",
+        "jsonType.label":"String",
+        "id.token.claim":"true",
+        "access.token.claim":"true",
+        "userinfo.token.claim":"true",
+        "multivalued":"false"
+      }
+    }'
+
+  # 7. Verify token has all claims
+  curl -s -X POST "http://localhost:8181/realms/scm/protocol/openid-connect/token" \
+    -d "client_id=scm-backend&client_secret=JWNcEsWwB55seZR4nYd4feW0AD7o1A7g&username=prasannakrishna&password=TempPass@123&grant_type=password"
+

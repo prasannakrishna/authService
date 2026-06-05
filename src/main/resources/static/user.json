@@ -14,3 +14,6 @@
   "orgId": 301,
   "isAppUser": true
 }
+
+to start keycloak bin/kc.sh start-dev --http-port 8181
+keycloak-26.5.2 % bin/kc.sh start-dev --http-port 8181 in downloads wherever server exists

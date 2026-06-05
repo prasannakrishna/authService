@@ -26,28 +26,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private UserInfoUserDetailsService  userDetailsService;
 
     @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        // Disabled: oauth2ResourceServer handles JWT validation via Keycloak JWKS
+        return true;
+    }
+
+    @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
-        String authHeader = request.getHeader("Authorization");
-        String token = null;
-        String username = null;
-
-        /*if (request.getServletPath().equals("/auth/login")) {
-            //filterChain.doFilter(request, response);
-            return;
-        }*/
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            token = authHeader.substring(7);
-            username = jwtService.extractUsername(token);
-        }
-
-        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-            if (jwtService.validateToken(token, userDetails)) {
-                UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
-                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                SecurityContextHolder.getContext().setAuthentication(authToken);
-            }
-        }
+        // Disabled: oauth2ResourceServer handles Keycloak JWT validation
         filterChain.doFilter(request, response);
     }
 }
