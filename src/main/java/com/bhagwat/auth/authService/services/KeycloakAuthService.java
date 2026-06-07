@@ -129,29 +129,46 @@ public class KeycloakAuthService {
     }
 
     public AuthResponse refresh(String refreshToken) {
-        //currently we are doing wrong. refresh token should not be getting directly like this. we should create actor token
-        // based on dpop token received. this actor token should be sent to keycloack and if actor token is signed using kid that keycloack knows
-        // then it should generate refresh token.
+        return refresh(refreshToken, null);
+    }
+
+    /**
+     * Refresh token using Keycloak's token endpoint.
+     * If actorToken is provided, sends it as client_assertion for service identity proof.
+     * Keycloak validates the actor token by fetching our JWKS endpoint.
+     */
+    public AuthResponse refresh(String refreshToken, String actorToken) {
         String tokenUrl = serverUrl + "/realms/" + realm + "/protocol/openid-connect/token";
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "refresh_token");
         form.add("client_id", clientId);
-        if (clientSecret != null && !clientSecret.isBlank()) {
+        form.add("refresh_token", refreshToken);
+
+        if (actorToken != null && !actorToken.isBlank()) {
+            // Use actor token as client assertion (JWT Bearer method)
+            // Keycloak validates this by fetching our /.well-known/jwks.json
+            form.add("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer");
+            form.add("client_assertion", actorToken);
+        } else if (clientSecret != null && !clientSecret.isBlank()) {
             form.add("client_secret", clientSecret);
         }
-        form.add("refresh_token", refreshToken);
+
         KeycloakTokenResponse tokenResponse;
         try {
             tokenResponse = restTemplate.postForEntity(
                     tokenUrl, new HttpEntity<>(form, headers), KeycloakTokenResponse.class).getBody();
         } catch (HttpClientErrorException e) {
+            log.error("Keycloak refresh failed: {} — {}", e.getStatusCode(), e.getResponseBodyAsString());
             throw new RuntimeException("Refresh token expired or invalid");
         }
+
         if (tokenResponse == null || tokenResponse.getAccessToken() == null) {
             throw new RuntimeException("No token received from Keycloak");
         }
+
         Map<String, Object> claims = extractClaims(tokenResponse.getAccessToken());
         return AuthResponse.builder()
                 .accessToken(tokenResponse.getAccessToken())

@@ -128,10 +128,11 @@ public class AuthController {
         }
 
         try {
-            // Create Actor Token for Keycloak interaction
+            // Create Actor Token for Keycloak — signed by our JWKS private key.
+            // Keycloak validates this by fetching /.well-known/jwks.json from authService.
             String actorToken = actorTokenService.createActorTokenForKeycloak("auth-service-refresh");
 
-            AuthResponse response = keycloakAuthService.refresh(refreshToken);
+            AuthResponse response = keycloakAuthService.refresh(refreshToken, actorToken);
 
             // Rebind DPoP to new refresh token
             if (dpopThumbprint != null && response.getRefreshToken() != null) {
