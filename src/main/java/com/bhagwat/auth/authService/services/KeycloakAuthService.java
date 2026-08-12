@@ -55,9 +55,13 @@ public class KeycloakAuthService {
             Map<String, Object> validateResult = validateResponse.getBody();
             if (validateResult == null || !Boolean.TRUE.equals(validateResult.get("success"))) {
                 String msg = validateResult != null ? (String) validateResult.get("message") : "Invalid credentials";
+                log.warn("UserService credential validation failed for '{}': {}", username, msg);
                 throw new RuntimeException(msg);
             }
+            log.info("UserService credential validation passed for '{}'", username);
         } catch (HttpClientErrorException e) {
+            log.error("UserService validation call failed for '{}': status={}, body={}",
+                    username, e.getStatusCode(), e.getResponseBodyAsString());
             throw new RuntimeException("Authentication failed: invalid username or password");
         }
 
@@ -75,7 +79,7 @@ public class KeycloakAuthService {
         }
         form.add("username", username);
         form.add("password", password);
-        log.info("Sending authentication request to Keycloak{}...", password);
+        log.info("Sending authentication request to Keycloak for user '{}'...", username);
 
         HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(form, headers);
 
@@ -85,6 +89,8 @@ public class KeycloakAuthService {
                     tokenUrl, request, KeycloakTokenResponse.class);
             tokenResponse = response.getBody();
         } catch (HttpClientErrorException e) {
+            log.error("Keycloak authentication failed for user '{}': status={}, body={}",
+                    username, e.getStatusCode(), e.getResponseBodyAsString());
             throw new RuntimeException("Authentication failed: invalid username or password");
         }
 

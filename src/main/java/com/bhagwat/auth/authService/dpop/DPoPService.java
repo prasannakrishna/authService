@@ -216,6 +216,11 @@ public class DPoPService {
         byte[] signatureBytes = Base64.getUrlDecoder().decode(signatureB64);
         String jcaAlg = mapAlgToJca(alg);
 
+        // JWS uses raw R||S format, but Java's ECDSA Signature expects DER encoding
+        if (alg.startsWith("ES")) {
+            signatureBytes = rawToDer(signatureBytes);
+        }
+
         Signature sig = Signature.getInstance(jcaAlg);
         sig.initVerify(publicKey);
         sig.update(signingInput.getBytes(StandardCharsets.UTF_8));
@@ -223,6 +228,48 @@ public class DPoPService {
         if (!sig.verify(signatureBytes)) {
             throw new DPoPValidationException("DPoP signature verification failed");
         }
+    }
+
+    /**
+     * Convert raw R||S ECDSA signature to DER encoding.
+     * JWS (RFC 7515) uses raw concatenation, Java Signature uses DER.
+     */
+    private byte[] rawToDer(byte[] raw) {
+        int halfLen = raw.length / 2;
+        byte[] r = trimLeadingZeros(raw, 0, halfLen);
+        byte[] s = trimLeadingZeros(raw, halfLen, halfLen);
+
+        // If high bit set, prepend 0x00 to keep positive
+        boolean rPad = (r[0] & 0x80) != 0;
+        boolean sPad = (s[0] & 0x80) != 0;
+
+        int rLen = r.length + (rPad ? 1 : 0);
+        int sLen = s.length + (sPad ? 1 : 0);
+        int totalLen = 2 + rLen + 2 + sLen;
+
+        byte[] der = new byte[2 + totalLen];
+        int offset = 0;
+        der[offset++] = 0x30;
+        der[offset++] = (byte) totalLen;
+
+        der[offset++] = 0x02;
+        der[offset++] = (byte) rLen;
+        if (rPad) der[offset++] = 0x00;
+        System.arraycopy(r, 0, der, offset, r.length);
+        offset += r.length;
+
+        der[offset++] = 0x02;
+        der[offset++] = (byte) sLen;
+        if (sPad) der[offset++] = 0x00;
+        System.arraycopy(s, 0, der, offset, s.length);
+
+        return der;
+    }
+
+    private byte[] trimLeadingZeros(byte[] data, int start, int length) {
+        int i = start;
+        while (i < start + length - 1 && data[i] == 0) i++;
+        return Arrays.copyOfRange(data, i, start + length);
     }
 
     private String mapAlgToJca(String alg) {
