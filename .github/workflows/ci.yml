@@ -27,6 +27,11 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
+      - name: Install shared libraries
+        run: |
+          git clone --depth=1 https://github.com/prasannakrishna/shared-library.git /tmp/shared-library
+          cd /tmp/shared-library && chmod +x gradlew && ./gradlew publishToMavenLocal -q
+
       - name: Build JAR
         run: mvn -q -DskipTests clean package
 
