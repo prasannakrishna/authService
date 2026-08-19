@@ -72,7 +72,31 @@ public class KeycloakAuthService {
             throw new RuntimeException("Authentication failed: invalid username or password");
         }
 
-        // Step 2: Credentials verified — authenticate with Keycloak to obtain JWT
+        // Step 2: Pre-fetch user attributes (used for provisioning + response enrichment)
+        Map<String, String> kcAttrs = null;
+        Map<String, Object> userDoc = null;
+        try {
+            ResponseEntity<Map> attrsResp = restTemplate.getForEntity(
+                    userServiceBaseUrl + "/api/users/by-username/" + username + "/keycloak-attrs", Map.class);
+            if (attrsResp.getStatusCode().is2xxSuccessful() && attrsResp.getBody() != null) {
+                kcAttrs = (Map<String, String>) attrsResp.getBody();
+            }
+        } catch (Exception e) {
+            log.warn("Could not pre-fetch keycloak-attrs for '{}' (non-fatal): {}", username, e.getMessage());
+        }
+        try {
+            ResponseEntity<Map> userResp = restTemplate.getForEntity(
+                    userServiceBaseUrl + "/api/users/by-username/" + username, Map.class);
+            if (userResp.getStatusCode().is2xxSuccessful() && userResp.getBody() != null) {
+                userDoc = userResp.getBody();
+            }
+        } catch (Exception e) {
+            log.warn("Could not pre-fetch user profile for '{}' (non-fatal): {}", username, e.getMessage());
+        }
+        final Map<String, String> cachedKcAttrs = kcAttrs;
+        final Map<String, Object> cachedUserDoc = userDoc;
+
+        // Step 3: Credentials verified — authenticate with Keycloak to obtain JWT
         String tokenUrl = serverUrl + "/realms/" + realm + "/protocol/openid-connect/token";
 
         HttpHeaders headers = new HttpHeaders();
@@ -97,9 +121,9 @@ public class KeycloakAuthService {
             tokenResponse = response.getBody();
         } catch (HttpClientErrorException e) {
             if (e.getStatusCode().value() == 401) {
-                // User validated by userService but missing/stale in Keycloak — provision and retry
+                // User validated by userService but missing/stale in Keycloak — provision with full attributes and retry
                 log.warn("User '{}' not in Keycloak (401), auto-provisioning with validated credentials", username);
-                provisionOrUpdateKeycloakUser(username, password);
+                provisionOrUpdateKeycloakUser(username, password, cachedKcAttrs);
                 try {
                     tokenResponse = restTemplate.postForEntity(tokenUrl, request, KeycloakTokenResponse.class).getBody();
                 } catch (HttpClientErrorException retryEx) {
@@ -119,35 +143,34 @@ public class KeycloakAuthService {
 
         Map<String, Object> claims = extractClaims(tokenResponse.getAccessToken());
 
+        // Resolve attributes: JWT claims take priority, fall back to pre-fetched attrs
+        String resolvedTenantId = firstNonNull(getClaimAsString(claims, "tenantId"), attr(cachedKcAttrs, "tenantId"));
+        String resolvedOrgId = firstNonNull(getClaimAsString(claims, "orgId"), attr(cachedKcAttrs, "orgId"));
+        String resolvedDomainType = firstNonNull(getClaimAsString(claims, "domainType"), attr(cachedKcAttrs, "domainType"));
+        String resolvedRoleType = firstNonNull(getClaimAsString(claims, "roleType"), attr(cachedKcAttrs, "roleType"));
+        String resolvedSubType = firstNonNull(getClaimAsString(claims, "subscriptionType"), attr(cachedKcAttrs, "subscriptionType"));
+
         AuthResponse.AuthResponseBuilder builder = AuthResponse.builder()
                 .accessToken(tokenResponse.getAccessToken())
                 .refreshToken(tokenResponse.getRefreshToken())
                 .tokenType(tokenResponse.getTokenType())
                 .expiresIn(tokenResponse.getExpiresIn())
                 .refreshExpiresIn(tokenResponse.getRefreshExpiresIn())
-                .tenantId(getClaimAsString(claims, "tenantId"))
-                .orgId(getClaimAsString(claims, "orgId"))
-                .domainType(getClaimAsString(claims, "domainType"))
-                .roleType(getClaimAsString(claims, "roleType"))
-                .subscriptionType(getClaimAsString(claims, "subscriptionType"))
+                .tenantId(resolvedTenantId)
+                .orgId(resolvedOrgId)
+                .domainType(resolvedDomainType)
+                .roleType(resolvedRoleType)
+                .subscriptionType(resolvedSubType)
                 .username(username);
 
-        // Step 3: Enrich response with user profile from userService MongoDB read store (no password stored there)
-        try {
-            String userUrl = userServiceBaseUrl + "/api/users/by-username/" + username;
-            ResponseEntity<Map> userResponse = restTemplate.getForEntity(userUrl, Map.class);
-            if (userResponse.getStatusCode().is2xxSuccessful() && userResponse.getBody() != null) {
-                Map<String, Object> userDoc = userResponse.getBody();
-                builder.userId(getStr(userDoc, "userId"))
-                        .email(getStr(userDoc, "email"))
-                        .orgId(getStr(userDoc, "orgId"))
-                        .orgName(getStr(userDoc, "orgName"))
-                        .divisionId(getStr(userDoc, "divisionId"))
-                        .divisionName(getStr(userDoc, "divisionName"));
-            }
-        } catch (Exception e) {
-            // Non-fatal: userService may not have synced yet — proceed without enrichment
-            System.err.println("Could not fetch user details from userService: " + e.getMessage());
+        // Step 4: Enrich from userService MongoDB read store (orgId from MongoDB overrides JWT if present)
+        if (cachedUserDoc != null) {
+            builder.userId(getStr(cachedUserDoc, "userId"))
+                    .email(getStr(cachedUserDoc, "email"))
+                    .orgId(firstNonNull(getStr(cachedUserDoc, "orgId"), resolvedOrgId))
+                    .orgName(getStr(cachedUserDoc, "orgName"))
+                    .divisionId(getStr(cachedUserDoc, "divisionId"))
+                    .divisionName(getStr(cachedUserDoc, "divisionName"));
         }
 
         return builder.build();
@@ -208,7 +231,7 @@ public class KeycloakAuthService {
                 .build();
     }
 
-    private void provisionOrUpdateKeycloakUser(String username, String password) {
+    private void provisionOrUpdateKeycloakUser(String username, String password, Map<String, String> userAttrs) {
         try {
             // Get admin token from master realm
             String adminTokenUrl = serverUrl + "/realms/master/protocol/openid-connect/token";
@@ -229,27 +252,62 @@ public class KeycloakAuthService {
             String usersUrl = serverUrl + "/admin/realms/" + realm + "/users";
             Map<String, Object> cred = Map.of("type", "password", "value", password, "temporary", false);
 
+            // Build attributes for Keycloak user (tenantId, orgId, domainType, roleType, subscriptionType)
+            java.util.Map<String, java.util.List<String>> kcAttributes = new java.util.LinkedHashMap<>();
+            if (userAttrs != null) {
+                String[] attrKeys = {"tenantId", "orgId", "domainType", "roleType", "subscriptionType"};
+                for (String key : attrKeys) {
+                    String val = userAttrs.get(key);
+                    if (val != null && !val.isBlank()) {
+                        kcAttributes.put(key, List.of(val));
+                    }
+                }
+            }
+
+            String firstName = (userAttrs != null && userAttrs.get("name") != null) ? userAttrs.get("name") : username;
+            String email = (userAttrs != null) ? userAttrs.get("email") : null;
+
             // Check if user already exists
             String searchUrl = usersUrl + "?username=" + username + "&exact=true";
             ResponseEntity<List> existing = restTemplate.exchange(searchUrl, HttpMethod.GET, new HttpEntity<>(authH), List.class);
             if (existing.getBody() != null && !existing.getBody().isEmpty()) {
-                // Update password on existing user
                 Map<?, ?> existingUser = (Map<?, ?>) existing.getBody().get(0);
                 String userId = (String) existingUser.get("id");
+                // Update: set firstName, email, emailVerified, clear requiredActions, set attributes
+                java.util.Map<String, Object> userUpdate = new java.util.LinkedHashMap<>();
+                userUpdate.put("firstName", firstName);
+                if (email != null) { userUpdate.put("email", email); userUpdate.put("emailVerified", true); }
+                userUpdate.put("requiredActions", List.of());
+                if (!kcAttributes.isEmpty()) userUpdate.put("attributes", kcAttributes);
+                restTemplate.put(usersUrl + "/" + userId, new HttpEntity<>(userUpdate, authH));
                 restTemplate.put(usersUrl + "/" + userId + "/reset-password", new HttpEntity<>(cred, authH));
-                log.info("Keycloak password updated for existing user '{}'", username);
+                log.info("Keycloak user updated with password + attributes for '{}'", username);
             } else {
-                // Create new user
-                Map<String, Object> userRep = Map.of(
-                        "username", username, "enabled", true,
-                        "credentials", List.of(cred));
+                // Create new user with all attributes
+                java.util.Map<String, Object> userRep = new java.util.LinkedHashMap<>();
+                userRep.put("username", username);
+                userRep.put("enabled", true);
+                userRep.put("emailVerified", true);
+                userRep.put("firstName", firstName);
+                if (email != null) userRep.put("email", email);
+                userRep.put("requiredActions", List.of());
+                userRep.put("credentials", List.of(cred));
+                if (!kcAttributes.isEmpty()) userRep.put("attributes", kcAttributes);
                 restTemplate.postForEntity(usersUrl, new HttpEntity<>(userRep, authH), Void.class);
-                log.info("Keycloak user provisioned: '{}'", username);
+                log.info("Keycloak user provisioned with attributes: '{}'", username);
             }
         } catch (Exception e) {
             log.error("Failed to provision Keycloak user '{}': {}", username, e.getMessage());
             throw new RuntimeException("Authentication failed: could not provision user");
         }
+    }
+
+    private String firstNonNull(String a, String b) {
+        return (a != null && !a.isBlank()) ? a : b;
+    }
+
+    private String attr(Map<String, String> map, String key) {
+        return map != null ? map.get(key) : null;
     }
 
     private Map<String, Object> extractClaims(String accessToken) {
