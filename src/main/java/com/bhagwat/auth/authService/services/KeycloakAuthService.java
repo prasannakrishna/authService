@@ -14,6 +14,7 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -37,6 +38,12 @@ public class KeycloakAuthService {
 
     @Value("${userservice.base-url:http://localhost:8087}")
     private String userServiceBaseUrl;
+
+    @Value("${keycloak.admin.username:admin}")
+    private String adminUsername;
+
+    @Value("${keycloak.admin.password:admin123}")
+    private String adminPassword;
 
     public KeycloakAuthService(RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
@@ -89,9 +96,21 @@ public class KeycloakAuthService {
                     tokenUrl, request, KeycloakTokenResponse.class);
             tokenResponse = response.getBody();
         } catch (HttpClientErrorException e) {
-            log.error("Keycloak authentication failed for user '{}': status={}, body={}",
-                    username, e.getStatusCode(), e.getResponseBodyAsString());
-            throw new RuntimeException("Authentication failed: invalid username or password");
+            if (e.getStatusCode().value() == 401) {
+                // User validated by userService but missing/stale in Keycloak — provision and retry
+                log.warn("User '{}' not in Keycloak (401), auto-provisioning with validated credentials", username);
+                provisionOrUpdateKeycloakUser(username, password);
+                try {
+                    tokenResponse = restTemplate.postForEntity(tokenUrl, request, KeycloakTokenResponse.class).getBody();
+                } catch (HttpClientErrorException retryEx) {
+                    log.error("Keycloak retry failed for '{}': {}", username, retryEx.getResponseBodyAsString());
+                    throw new RuntimeException("Authentication failed: invalid username or password");
+                }
+            } else {
+                log.error("Keycloak authentication failed for user '{}': status={}, body={}",
+                        username, e.getStatusCode(), e.getResponseBodyAsString());
+                throw new RuntimeException("Authentication failed: invalid username or password");
+            }
         }
 
         if (tokenResponse == null || tokenResponse.getAccessToken() == null) {
@@ -187,6 +206,50 @@ public class KeycloakAuthService {
                 .roleType(getClaimAsString(claims, "roleType"))
                 .subscriptionType(getClaimAsString(claims, "subscriptionType"))
                 .build();
+    }
+
+    private void provisionOrUpdateKeycloakUser(String username, String password) {
+        try {
+            // Get admin token from master realm
+            String adminTokenUrl = serverUrl + "/realms/master/protocol/openid-connect/token";
+            HttpHeaders h = new HttpHeaders();
+            h.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+            MultiValueMap<String, String> adminForm = new LinkedMultiValueMap<>();
+            adminForm.add("grant_type", "password");
+            adminForm.add("client_id", "admin-cli");
+            adminForm.add("username", adminUsername);
+            adminForm.add("password", adminPassword);
+            Map<?, ?> adminToken = restTemplate.postForEntity(adminTokenUrl, new HttpEntity<>(adminForm, h), Map.class).getBody();
+            String token = (String) adminToken.get("access_token");
+
+            HttpHeaders authH = new HttpHeaders();
+            authH.setContentType(MediaType.APPLICATION_JSON);
+            authH.setBearerAuth(token);
+
+            String usersUrl = serverUrl + "/admin/realms/" + realm + "/users";
+            Map<String, Object> cred = Map.of("type", "password", "value", password, "temporary", false);
+
+            // Check if user already exists
+            String searchUrl = usersUrl + "?username=" + username + "&exact=true";
+            ResponseEntity<List> existing = restTemplate.exchange(searchUrl, HttpMethod.GET, new HttpEntity<>(authH), List.class);
+            if (existing.getBody() != null && !existing.getBody().isEmpty()) {
+                // Update password on existing user
+                Map<?, ?> existingUser = (Map<?, ?>) existing.getBody().get(0);
+                String userId = (String) existingUser.get("id");
+                restTemplate.put(usersUrl + "/" + userId + "/reset-password", new HttpEntity<>(cred, authH));
+                log.info("Keycloak password updated for existing user '{}'", username);
+            } else {
+                // Create new user
+                Map<String, Object> userRep = Map.of(
+                        "username", username, "enabled", true,
+                        "credentials", List.of(cred));
+                restTemplate.postForEntity(usersUrl, new HttpEntity<>(userRep, authH), Void.class);
+                log.info("Keycloak user provisioned: '{}'", username);
+            }
+        } catch (Exception e) {
+            log.error("Failed to provision Keycloak user '{}': {}", username, e.getMessage());
+            throw new RuntimeException("Authentication failed: could not provision user");
+        }
     }
 
     private Map<String, Object> extractClaims(String accessToken) {
