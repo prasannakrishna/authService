@@ -27,7 +27,9 @@ public class SecurityConfig {
             "/auth/refresh",
             "/auth/public-key",
             "/.well-known/jwks.json",
-            "/.well-known/openid-configuration"
+            "/.well-known/openid-configuration",
+            "/actuator/**",
+            "/actuator/prometheus"
     };
 
     @Bean
